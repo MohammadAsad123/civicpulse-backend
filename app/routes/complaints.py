@@ -9,6 +9,7 @@ from app.services.priority_service import calculate_priority_score
 from app.services.ml_service import classify_image
 from fastapi import UploadFile, File
 from fastapi import Form
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -45,6 +46,17 @@ async def create_complaint(
 
     issue_type = label_map.get(predicted_class, "unknown")
 
+    # SLA hours based on issue type
+    sla_map = {
+    "garbage_issue": 24,
+    "road_issue": 48,
+    "water_issue": 12,
+    "streetlight": 72,
+    "no_issue": 24
+    }
+    sla_hours = sla_map.get(issue_type, 48)
+    sla_deadline = datetime.utcnow() + timedelta(hours=sla_hours)
+
     # upload image to Supabase Storage
     file_path = f"complaints/{file.filename}"
 
@@ -64,7 +76,8 @@ async def create_complaint(
         "longitude": longitude,
         "severity_score": severity_score,
         "priority_score": 0,
-        "status": "submitted"
+        "status": "submitted",
+        "sla_deadline": sla_deadline
     }
 
     response = supabase.table("complaints").insert(data).execute()
@@ -89,27 +102,11 @@ async def create_complaint(
         "predicted_issue": issue_type,
         "severity_score": severity_score,
         "manual_review": manual_review,
-        "status": "submitted"
+        "status": "submitted",
+        "sla_deadline": sla_deadline
     }
 
-    response = supabase.table("complaints").insert(data).execute()
-
-    complaint_id = response.data[0]["id"]
-
-    # save complaint image
-    supabase.table("complaint_images").insert({
-        "complaint_id": complaint_id,
-        "image_url": image_url
-    }).execute()
-
-    return {
-        "ticket_id": complaint_id,
-        "predicted_issue": issue_type,
-        "severity_score": severity_score,
-        "manual_review": manual_review,
-        "status": "submitted"
-    }
-
+    
 
 @router.get("/complaints")
 def get_complaints(

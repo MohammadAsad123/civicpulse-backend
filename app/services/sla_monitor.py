@@ -12,7 +12,7 @@ def check_sla_breaches():
 
     for complaint in complaints:
 
-        if complaint["sla_deadline"]:
+        if complaint["sla_deadline"] and complaint["status"] != "resolved":
 
             deadline = datetime.fromisoformat(complaint["sla_deadline"])
 

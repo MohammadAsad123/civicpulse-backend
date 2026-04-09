@@ -25,5 +25,5 @@ app.include_router(work_orders.router)
 app.include_router(notifications.router)
 
 scheduler = BackgroundScheduler()
-scheduler.add_job(check_sla_breaches, "interval", hours=1)
+scheduler.add_job(check_sla_breaches, "interval", minutes=60)
 scheduler.start()
