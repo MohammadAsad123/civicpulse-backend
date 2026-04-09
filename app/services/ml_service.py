@@ -1,20 +1,7 @@
-import random
+from app.ml.classifier import CivicIssueClassifier
 
+# Load model once when backend starts
+classifier = CivicIssueClassifier()
 
-def classify_image(image_bytes):
-
-    labels = ["road_issue", "garbage_issue"]
-
-    label = random.choice(labels)
-    confidence = round(random.uniform(0.6, 0.95), 2)
-
-    severity_score = round(confidence, 2)
-
-    manual_review = confidence < 0.6
-
-    return {
-        "label": label,
-        "confidence": confidence,
-        "severity_score": severity_score,
-        "manual_review": manual_review
-    }
+def classify_image(image_bytes: bytes):
+    return classifier.predict(image_bytes)

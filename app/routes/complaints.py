@@ -6,49 +6,110 @@ from fastapi import Query
 from app.utils.auth import get_current_user
 from fastapi import Depends
 from app.services.priority_service import calculate_priority_score
+from app.services.ml_service import classify_image
+from fastapi import UploadFile, File
+from fastapi import Form
 
 router = APIRouter()
 
 
-class ComplaintCreate(BaseModel):
-    issue_type: str
-    description: str | None = None
-    latitude: float
-    longitude: float
-    image_urls: list[str] | None = []
 
 
 @router.post("/complaints")
-def create_complaint(
-    complaint: ComplaintCreate,
+async def create_complaint(
+    file: UploadFile = File(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
+    description: str | None = Form(None),
     user_id: str = Depends(get_current_user)
 ):
 
+    # read image
+    image_bytes = await file.read()
+
+    # run ML classification
+    ml_result = classify_image(image_bytes)
+
+    predicted_class = ml_result["predicted_class"]
+    severity_score = ml_result["severity_score"]
+    manual_review = ml_result["needs_manual_review"]
+
+    # map ML labels to backend issue types
+    label_map = {
+        "Garbage Dataset": "garbage_issue",
+        "Road Dataset": "road_issue",
+        "Street Light Dataset": "streetlight",
+        "Water Issues Dataset": "water_issue",
+        "No Issue Dataset": "no_issue"
+    }
+
+    issue_type = label_map.get(predicted_class, "unknown")
+
+    # upload image to Supabase Storage
+    file_path = f"complaints/{file.filename}"
+
+    supabase.storage.from_("complaint-images").upload(
+        file_path,
+        image_bytes
+    )
+
+    image_url = supabase.storage.from_("complaint-images").get_public_url(file_path)
+
+    # create complaint data
     data = {
-        "user_id": user_id,  # temporary user
-        "issue_type": complaint.issue_type,
-        "description": complaint.description,
-        "latitude": complaint.latitude,
-        "longitude": complaint.longitude,
-        "severity_score": 0.5,
-        "priority_score": 0.5,
+        "user_id": user_id,
+        "issue_type": issue_type,
+        "description": description,
+        "latitude": latitude,
+        "longitude": longitude,
+        "severity_score": severity_score,
+        "priority_score": 0,
         "status": "submitted"
     }
 
     response = supabase.table("complaints").insert(data).execute()
+
     complaint_id = response.data[0]["id"]
-    # Save images
-    if complaint.image_urls:
-        for url in complaint.image_urls:
-            supabase.table("complaint_images").insert({
-                "complaint_id": complaint_id,
-                "image_url": url
-            }).execute()
+
+    # calculate priority score
+    priority_score = calculate_priority_score(complaint_id, severity_score)
+
+    supabase.table("complaints").update({
+        "priority_score": priority_score
+    }).eq("id", complaint_id).execute()
+
+    # save complaint image
+    supabase.table("complaint_images").insert({
+        "complaint_id": complaint_id,
+        "image_url": image_url
+    }).execute()
 
     return {
-        "ticket_id": response.data[0]["id"],
+        "ticket_id": complaint_id,
+        "predicted_issue": issue_type,
+        "severity_score": severity_score,
+        "manual_review": manual_review,
         "status": "submitted"
     }
+
+    response = supabase.table("complaints").insert(data).execute()
+
+    complaint_id = response.data[0]["id"]
+
+    # save complaint image
+    supabase.table("complaint_images").insert({
+        "complaint_id": complaint_id,
+        "image_url": image_url
+    }).execute()
+
+    return {
+        "ticket_id": complaint_id,
+        "predicted_issue": issue_type,
+        "severity_score": severity_score,
+        "manual_review": manual_review,
+        "status": "submitted"
+    }
+
 
 @router.get("/complaints")
 def get_complaints(
