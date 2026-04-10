@@ -77,7 +77,7 @@ async def create_complaint(
         "severity_score": severity_score,
         "priority_score": 0,
         "status": "submitted",
-        "sla_deadline": sla_deadline
+        "sla_deadline": sla_deadline.isoformat()
     }
 
     response = supabase.table("complaints").insert(data).execute()
@@ -103,7 +103,7 @@ async def create_complaint(
         "severity_score": severity_score,
         "manual_review": manual_review,
         "status": "submitted",
-        "sla_deadline": sla_deadline
+        "sla_deadline": sla_deadline.isoformat()
     }
 
     
