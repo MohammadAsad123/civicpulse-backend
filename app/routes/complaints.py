@@ -10,6 +10,9 @@ from app.services.ml_service import classify_image
 from fastapi import UploadFile, File
 from fastapi import Form
 from datetime import datetime, timedelta
+from math import radians, sin, cos, sqrt, atan2
+from app.utils.auth import require_citizen
+import uuid
 
 router = APIRouter()
 
@@ -22,7 +25,7 @@ async def create_complaint(
     latitude: float = Form(...),
     longitude: float = Form(...),
     description: str | None = Form(None),
-    user_id: str = Depends(get_current_user)
+    user = Depends(require_citizen)
 ):
 
     # read image
@@ -58,7 +61,7 @@ async def create_complaint(
     sla_deadline = datetime.utcnow() + timedelta(hours=sla_hours)
 
     # upload image to Supabase Storage
-    file_path = f"complaints/{file.filename}"
+    file_path = f"complaints/{uuid.uuid4()}_{file.filename}"
 
     supabase.storage.from_("complaint-images").upload(
         file_path,
@@ -69,7 +72,7 @@ async def create_complaint(
 
     # create complaint data
     data = {
-        "user_id": user_id,
+        "user_id": user["id"],
         "issue_type": issue_type,
         "description": description,
         "latitude": latitude,
@@ -114,7 +117,8 @@ def get_complaints(
     status: str | None = Query(None),
     breach_flag: bool | None = Query(None),
     limit: int = Query(20),
-    offset: int = Query(0)
+    offset: int = Query(0),
+    user = Depends(get_current_user)
 ):
 
     query = supabase.table("complaints").select("*")
@@ -131,6 +135,38 @@ def get_complaints(
     response = query.range(offset, offset + limit - 1).execute()
 
     return response.data
+
+
+@router.get("/complaints/nearby")
+def get_nearby_complaints(latitude: float, longitude: float):
+
+    res = supabase.table("complaints")\
+        .select("id, issue_type, description, latitude, longitude, severity_score, priority_score, sla_deadline")\
+        .execute()
+
+    complaints = res.data
+
+    nearby = []
+
+    for c in complaints:
+
+        lat1 = radians(latitude)
+        lon1 = radians(longitude)
+        lat2 = radians(c["latitude"])
+        lon2 = radians(c["longitude"])
+
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c_val = 2 * atan2(sqrt(a), sqrt(1-a))
+
+        distance = 6371000 * c_val   # meters
+
+        if distance <= 200:
+            nearby.append(c)
+
+    return nearby
 
 @router.get("/complaints/{complaint_id}")
 def get_complaint_by_id(complaint_id: str):
@@ -166,12 +202,12 @@ def update_complaint_status(complaint_id: str, update: StatusUpdate):
 @router.post("/complaints/{complaint_id}/upvote")
 def upvote_complaint(
     complaint_id: str,
-    user_id: str = Depends(get_current_user)
+    user = Depends(get_current_user)
 ):
 
     data = {
         "complaint_id": complaint_id,
-        "user_id": user_id
+        "user_id": user["id"]
     }
 
     response = supabase.table("upvotes").insert(data).execute()
@@ -196,3 +232,5 @@ def upvote_complaint(
         "message": "Complaint upvoted successfully",
         "priority_score": priority_score
     }
+
+

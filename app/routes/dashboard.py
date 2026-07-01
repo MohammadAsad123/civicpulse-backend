@@ -28,7 +28,7 @@ def get_dashboard_stats():
 def get_heatmap_data():
 
     response = supabase.table("complaints").select(
-        "latitude, longitude, severity_score"
+        "id, issue_type, latitude, longitude, severity_score"
     ).execute()
 
     return response.data

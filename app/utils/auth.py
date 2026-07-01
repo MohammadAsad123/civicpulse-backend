@@ -1,32 +1,63 @@
-from fastapi import HTTPException, Security
+from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import jwt
 import os
+import requests
 
 security = HTTPBearer()
 
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Security(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
+    print("AUTH FUNCTION CALLED")   # 👈 ADD THIS
 
     token = credentials.credentials
 
-    # test bypass
-    if token == "test-user":
-        return "00000000-0000-0000-0000-000000000001"
-
     try:
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated"
+        payload = jwt.get_unverified_claims(token)
+
+        user_id = payload.get("sub")
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+        # 🔥 Fetch role from profiles table
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
+            headers={
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {token}"
+            }
         )
 
-        return payload["sub"]
+        data = res.json()
+        print("SUPABASE RESPONSE:", data)
 
-    except Exception:
+        if not data:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return {
+            "id": user_id,
+            "role": data[0]["role"]
+        }
+
+    except Exception as e:
         raise HTTPException(status_code=401, detail="Token verification failed")
+
+
+# ✅ Citizen-only access
+def require_citizen(user=Depends(get_current_user)):
+    if user["role"] != "citizen":
+        raise HTTPException(status_code=403, detail="Citizen access only")
+    return user
+
+
+# ✅ Authority-only access
+def require_authority(user=Depends(get_current_user)):
+    if user["role"] != "authority":
+        raise HTTPException(status_code=403, detail="Authority access only")
+    return user
